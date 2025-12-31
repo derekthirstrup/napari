@@ -55,7 +55,16 @@ class ColorProperties:
         source_type: Any,
         handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
-        """Define how Pydantic V2 should validate this type."""
+        """
+        Provide a Pydantic v2 core schema that invokes this class's `_validate` before standard validation.
+        
+        Parameters:
+            source_type (Any): The originating Python type for which the schema is being requested.
+            handler (GetCoreSchemaHandler): Pydantic handler used to produce nested schemas when needed.
+        
+        Returns:
+            CoreSchema: A core schema configured to call `cls._validate` prior to applying the base schema.
+        """
         return core_schema.no_info_before_validator_function(
             cls._validate,
             core_schema.any_schema(),
@@ -63,7 +72,20 @@ class ColorProperties:
 
     @classmethod
     def _validate(cls, val: Any) -> 'ColorProperties | None':
-        """Validate and convert input to ColorProperties."""
+        """
+        Normalize and validate an input into a ColorProperties instance or None.
+        
+        Accepts None, a dict with keys 'name' and 'values' (and optional 'current_value'), or an existing ColorProperties instance. If given a dict, converts 'values' to a NumPy array and constructs a ColorProperties object. Returns None for None or an empty dict.
+        
+        Parameters:
+            val: The value to coerce into ColorProperties; may be None, a dict, or a ColorProperties instance.
+        
+        Returns:
+            ColorProperties or None: A ColorProperties instance built from the input, or None when input is None or an empty dict.
+        
+        Raises:
+            PydanticCustomError: If a dict is provided but is missing required keys or 'values' cannot be converted to a NumPy array, or if the input type is unsupported.
+        """
         if val is None:
             return None
         if isinstance(val, dict):
@@ -87,6 +109,15 @@ class ColorProperties:
             )
 
     def _json_encode(self):
+        """
+        Serialize the ColorProperties to a JSON-serializable dictionary.
+        
+        Returns:
+            dict: Dictionary containing:
+                - 'name': the property's name (str).
+                - 'values': the property's values as a list.
+                - 'current_value': the current value for the next item, or `None`.
+        """
         return {
             'name': self.name,
             'values': self.values.tolist(),
@@ -165,11 +196,29 @@ class ColorManager(EventedModel):
     @field_validator('continuous_colormap', mode='before')
     @classmethod
     def _ensure_continuous_colormap(cls, v):
+        """
+        Coerces an input into a continuous colormap suitable for numeric color mapping.
+        
+        Parameters:
+            v: The value to convert into a continuous colormap (may be a name, mapping, or colormap-like object).
+        
+        Returns:
+            Colormap: A continuous Colormap instance.
+        """
         return ensure_colormap(v)
 
     @field_validator('colors', mode='before')
     @classmethod
     def _ensure_color_array(cls, v):
+        """
+        Coerce a sequence of colors into an Nx4 RGBA color array, or return an empty (0, 4) array when given no colors.
+        
+        Parameters:
+        	v: array-like or sequence of colors to normalize into RGBA format.
+        
+        Returns:
+        	np.ndarray: An array shaped (N, 4) containing RGBA colors; an empty array with shape (0, 4) if `v` is empty.
+        """
         if len(v) > 0:
             return transform_color(v)
 
@@ -178,6 +227,15 @@ class ColorManager(EventedModel):
     @field_validator('current_color', mode='before')
     @classmethod
     def _coerce_current_color(cls, v):
+        """
+        Normalize an input current color to a 4-channel RGBA color or None.
+        
+        Parameters:
+            v: A color value (sequence-like), an empty sequence, or None.
+        
+        Returns:
+            A length-4 RGBA color array when `v` contains color data, `None` if `v` is `None` or an empty sequence.
+        """
         if v is None:
             return v
         if len(v) == 0:
@@ -187,6 +245,14 @@ class ColorManager(EventedModel):
 
     @model_validator(mode='after')
     def _validate_colors(self) -> Self:
+        """
+        Reconciles and normalizes the model's color state according to the current color_mode.
+        
+        When color_mode is CYCLE or COLORMAP, delegates to the corresponding v2 validator helpers to obtain the resolved colors and any other fields that must be updated, applies those updates to the model, and for DIRECT mode uses the existing colors. If current_color is unset and there are colors available, sets current_color to the last color and, for CYCLE/COLORMAP, updates color_properties.current_value to the last property value. Finally stores the resolved colors on the instance and returns it.
+        
+        Returns:
+            Self: The same instance with colors and any dependent fields updated in place.
+        """
         color_mode = self.color_mode
         if color_mode == ColorMode.CYCLE:
             colors, updated = _validate_cycle_mode_v2(self)
@@ -221,18 +287,16 @@ class ColorManager(EventedModel):
         properties: dict[str, np.ndarray],
         current_properties: dict[str, np.ndarray],
     ):
-        """Set a color property. This is convenience function
-
-        Parameters
-        ----------
-        color : (N, 4) array or str
-            The value for setting edge or face_color
-        n_colors : int
-            The number of colors that needs to be set. Typically len(data).
-        properties : Dict[str, np.ndarray]
-            The layer property values
-        current_properties : Dict[str, np.ndarray]
-            The layer current property values
+        """
+        Determine and apply the color configuration for this manager based on the given input.
+        
+        If `color` names a layer property, configure `self.color_properties` with that property's values and set `self.color_mode` to COLORMAP for continuous properties or CYCLE for categorical properties. Otherwise, interpret `color` as a direct color (or sequence of colors), normalize and broadcast it to length `n_colors`, set `self.colors` to the resulting array, and set `self.color_mode` to DIRECT.
+        
+        Parameters:
+            color (ColorType): A property name or explicit color specification used to set edge/face colors.
+            n_colors (int): Number of color entries required (typically the length of the layer data).
+            properties (dict[str, np.ndarray]): Mapping of property names to their full arrays of values.
+            current_properties (dict[str, np.ndarray]): Mapping of property names to their current (selection) values; used to set the current_value of `ColorProperties`.
         """
         # if the provided color is a string, first check if it is a key in the properties.
         # otherwise, assume it is the name of a color
@@ -479,9 +543,29 @@ class ColorManager(EventedModel):
         current_color: np.ndarray | None = None,
         default_color_cycle: ColorType = None,
     ):
-        """Initialize a ColorManager object from layer kwargs. This is a convenience
-        function to coerce possible inputs into ColorManager kwargs
-
+        """
+        Create a ColorManager from layer-style keyword arguments by normalizing and coercing color-related inputs.
+        
+        Parameters:
+            colors (dict | str | np.ndarray): Either a dict of color kwargs (may contain keys like 'colors',
+                'color_mode', 'color_properties', etc.), a property name string indicating a mapped color,
+                or an array of direct colors.
+            properties (dict[str, np.ndarray]): Mapping of property names to their value arrays used when colors
+                map to a property name.
+            n_colors (int | None): Number of color entries expected; when provided, direct color inputs will be
+                broadcast to this length.
+            continuous_colormap (str | Colormap | None): Colormap to use for continuous (colormap) mode.
+            contrast_limits (tuple[float, float] | None): Contrast limits to apply for colormap scaling.
+            categorical_colormap (CategoricalColormap | list | np.ndarray | None): Colormap or cycle used for
+                categorical/cycle mode; if None, defaults to `default_color_cycle`.
+            color_mode (ColorMode | str | None): Explicit color mode to set (DIRECT, COLORMAP, or CYCLE);
+                if omitted the mode is inferred from inputs.
+            current_color (np.ndarray | None): Current RGBA color for the next item when operating in DIRECT mode.
+            default_color_cycle (ColorType): Fallback single-color or cycle used when no categorical colormap is provided.
+        
+        Returns:
+            ColorManager: An instance of the class (cls) initialized with normalized color fields suitable for
+            use by layers (fields include color_mode, colors or color_properties, current_color, and colormaps).
         """
         if default_color_cycle is None:
             default_color_cycle = np.array([1, 1, 1, 1])
@@ -595,7 +679,15 @@ class ColorManager(EventedModel):
 
 
 def _validate_cycle_mode_v2(model: ColorManager) -> tuple[np.ndarray, dict]:
-    """V2-compatible version of _validate_cycle_mode that works with model instances."""
+    """
+    Validate cycle-mode settings for a ColorManager instance and produce the resulting colors plus any model fields that changed.
+    
+    Parameters:
+        model (ColorManager): The ColorManager instance to validate; its current fields are read but not modified by this function.
+    
+    Returns:
+        tuple[np.ndarray, dict]: A pair where the first element is the computed Nx4 RGBA colors array, and the second is a dictionary of fields that changed (subset of 'color_properties', 'categorical_colormap', 'colors', 'current_color') mapped to their new values.
+    """
     # Store original values before they get modified
     original_values = {
         'color_mode': model.color_mode,
@@ -625,7 +717,19 @@ def _validate_cycle_mode_v2(model: ColorManager) -> tuple[np.ndarray, dict]:
 
 
 def _validate_colormap_mode_v2(model: ColorManager) -> tuple[np.ndarray, dict]:
-    """V2-compatible version of _validate_colormap_mode that works with model instances."""
+    """
+    Validate colormap-related fields for a ColorManager instance and produce the updated colors and any fields that changed.
+    
+    This function takes a snapshot of the model's relevant fields, runs colormap-mode validation using a mutable copy, and returns the resulting colors plus a dictionary of fields whose values differ from the original snapshot. The returned dictionary may include any of: 'color_properties', 'colors', 'current_color', and 'contrast_limits'.
+    
+    Parameters:
+        model (ColorManager): The ColorManager instance to validate; the instance itself is not modified by this function.
+    
+    Returns:
+        tuple:
+            - colors (np.ndarray): The validated/updated colors array.
+            - updated (dict): Mapping of field names to their new values for fields that changed compared to the original model.
+    """
     # Store original values before they get modified
     original_values = {
         'color_mode': model.color_mode,

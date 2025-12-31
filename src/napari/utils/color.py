@@ -21,6 +21,22 @@ class ColorValue(np.ndarray):
     """
 
     def __new__(cls, value: ColorValueParam) -> 'ColorValue':
+        """
+        Create a ColorValue by validating and coercing the input into a 4-element RGBA array.
+        
+        Parameters:
+            value (Union[np.ndarray, list, tuple, str, None]): A single color representation. Accepted forms include:
+                - RGB(A) sequence with values in [0, 1]
+                - CSS3 color name or matplotlib single-character color name
+                - RGB(A) hex string
+                - None
+        
+        Returns:
+            ColorValue: A NumPy array view of shape (4,) and dtype float32 containing RGBA values in the range [0, 1].
+        
+        Raises:
+            ValueError, AttributeError, KeyError: If the input cannot be recognized or converted to a color.
+        """
         return cls.validate(value)
 
     @classmethod
@@ -29,6 +45,12 @@ class ColorValue(np.ndarray):
         source_type: Any,
         handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
+        """
+        Return a pydantic-core schema that validates input with the class's `validate` method and serializes arrays to Python lists.
+        
+        Returns:
+            CoreSchema: A schema that runs `cls.validate` as a before-validator for any input and, on serialization, converts numpy arrays to lists via `x.tolist()` or other sequences via `list(x)`.
+        """
         return core_schema.no_info_before_validator_function(
             cls.validate,
             core_schema.any_schema(),
@@ -96,6 +118,15 @@ class ColorArray(np.ndarray):
     """
 
     def __new__(cls, value: ColorArrayParam) -> 'ColorArray':
+        """
+        Create a ColorArray by validating and coercing the given input into an (N, 4) RGBA array.
+        
+        Parameters:
+            value (ndarray | list | tuple | None): Sequence of color specifications (each element may be an ndarray, list, tuple, or color string) or None.
+        
+        Returns:
+            ColorArray: NumPy array of shape (N, 4) with dtype float32, representing RGBA values in the range [0, 1].
+        """
         return cls.validate(value)
 
     @classmethod
@@ -104,12 +135,26 @@ class ColorArray(np.ndarray):
         source_type: Any,
         handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
+        """
+        Provide a pydantic-core schema that invokes the class's validate() on incoming data before further validation.
+        
+        The returned schema accepts any input and runs cls.validate as a no-info before-validator, enabling pydantic to coerce and validate values for this custom NumPy-based type.
+        
+        Returns:
+            CoreSchema: A schema that applies `cls.validate` to the raw input prior to additional validation.
+        """
         return core_schema.no_info_before_validator_function(
             cls.validate,
             core_schema.any_schema(),
         )
 
     def __sizeof__(self) -> int:
+        """
+        Compute the instance's memory size including the array data buffer.
+        
+        Returns:
+            total_size (int): Sum of the object's overhead and the ndarray data buffer size in bytes.
+        """
         return super().__sizeof__() + self.nbytes
 
     @classmethod

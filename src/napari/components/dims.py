@@ -119,16 +119,32 @@ class Dims(EventedModel):
     )
     @classmethod
     def _as_tuple(cls, v):
+        """
+        Convert an input iterable to a tuple.
+        
+        Parameters:
+            cls: The class (unused).
+            v: The value to normalize; typically an iterable.
+        
+        Returns:
+            tuple: A tuple containing the elements of `v`.
+        """
         return tuple(v)
 
     @field_validator('range', mode='before')
     @classmethod
     def _check_ranges(cls, ranges):
         """
-        Ensure the range values are sane.
-
-        - start < stop
-        - step > 0
+        Validate per-axis ranges and return them unchanged.
+        
+        Parameters:
+            ranges (Iterable[tuple[float, float, float]]): Sequence of (start, stop, step) tuples, one per axis.
+        
+        Returns:
+            The validated `ranges` sequence.
+        
+        Raises:
+            ValueError: If any axis has start > stop or step <= 0.
         """
         for axis, (start, stop, step) in enumerate(ranges):
             if start > stop:
@@ -154,7 +170,19 @@ class Dims(EventedModel):
 
     @model_validator(mode='after')
     def _check_dims(self) -> Self:
-        """Check the consistency of dimensionality for all attributes."""
+        """
+        Normalize and validate Dims fields to be consistent with the current ndim.
+        
+        This method ensures per-field consistency and performs in-place normalization:
+        - Normalizes `range`, `point`, `margin_left`, `margin_right`, and `rollable` to length `ndim`.
+        - Converts `range` entries to `RangeTuple` and clamps `point` values to their ranges.
+        - Adjusts `order` to be a permutation of 0..ndim-1 (prepends or trims as needed).
+        - Ensures `axis_labels` has exactly `ndim` entries, adding sensible defaults or trimming.
+        - Updates `last_used` to a valid non-displayed slider with more than one step when appropriate.
+        
+        Returns:
+            Self: The same Dims instance with normalized and validated attributes.
+        """
         ndim = self.ndim
 
         # Use object.__setattr__ to bypass validate_assignment and avoid recursion
@@ -250,6 +278,15 @@ class Dims(EventedModel):
 
     @staticmethod
     def _nsteps_from_range(dims_range) -> tuple[float, ...]:
+        """
+        Compute the number of discrete steps for each range in `dims_range`.
+        
+        Parameters:
+            dims_range (Iterable[RangeTuple]): Sequence of ranges (start, stop, step) for each axis.
+        
+        Returns:
+            tuple[int, ...]: Number of steps for each range (inclusive), at least 1 per axis. If a range's `step` is zero or falsy, it is treated as 1.
+        """
         return tuple(
             # "or 1" ensures degenerate dimension works
             int((rng.stop - rng.start) / (rng.step or 1)) + 1

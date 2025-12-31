@@ -244,7 +244,19 @@ def convert_vispy_colormap(colormap, name='vispy'):
 
 
 def _napari_cmap_to_vispy(colormap: Colormap) -> VispyColormap:
-    """Convert a napari colormap to its equivalent vispy colormap."""
+    """
+    Convert a napari colormap into an equivalent vispy colormap.
+    
+    The conversion removes the napari colormap's `name` field and maps the `nan_color`
+    field to vispy's `bad_color` before constructing the VispyColormap.
+    
+    Parameters:
+        colormap: The napari Colormap to convert.
+    
+    Returns:
+        A VispyColormap representing the same colors, controls, interpolation, and
+        special colors as the input colormap.
+    """
     cmap_args = colormap.model_dump()
     cmap_args.pop('name')
     cmap_args['bad_color'] = cmap_args.pop('nan_color')

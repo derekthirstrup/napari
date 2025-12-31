@@ -57,7 +57,12 @@ T = TypeVar('T')
 
 # For sequence_like functionality
 def sequence_like(v: Any) -> bool:
-    """Check if a value is sequence-like (but not a string or bytes)."""
+    """
+    Determine whether a value is sequence-like (list, tuple, set, or frozenset), excluding strings and bytes.
+    
+    Returns:
+        True if the value is a list, tuple, set, or frozenset, False otherwise.
+    """
     return isinstance(v, (list, tuple, set, frozenset))
 
 
@@ -72,9 +77,18 @@ root_validator = model_validator  # deprecated: use @model_validator
 
 
 def parse_obj_as(type_: type[T], obj: Any) -> T:
-    """Parse an object as a given type.
-
-    Deprecated: Use TypeAdapter(type_).validate_python(obj) instead.
+    """
+    Validate and convert `obj` to the specified target type.
+    
+    Parameters:
+        type_ (type[T]): The target type to parse the input into.
+        obj (Any): The value to be validated and converted.
+    
+    Returns:
+        T: The parsed value as the specified type.
+    
+    Deprecated:
+        Use `TypeAdapter(type_).validate_python(obj)` directly.
     """
     return TypeAdapter(type_).validate_python(obj)
 
@@ -104,6 +118,13 @@ class ClassAttribute:
     """Stub for V1 ClassAttribute. Use standard class attributes in V2."""
 
     def __init__(self, name: str, value: Any) -> None:
+        """
+        Create an error-like object holding a name and its associated value.
+        
+        Parameters:
+            name (str): Identifier or code for the error/context.
+            value (Any): The value associated with the name.
+        """
         self.name = name
         self.value = value
 
@@ -125,14 +146,28 @@ class ErrorWrapper:
     """Stub for V1 ErrorWrapper. Use ValidationError directly in V2."""
 
     def __init__(self, exc: Exception, loc: tuple) -> None:
+        """
+        Initialize the ErrorWrapper with an underlying exception and its location.
+        
+        Parameters:
+            exc (Exception): The original exception being wrapped.
+            loc (tuple): A tuple describing the location/path in the model where the error occurred (e.g., field names or indices).
+        """
         self.exc = exc
         self.loc = loc
 
 
 def display_errors(errors: list[Any]) -> str:
-    """Format validation errors for display.
-
-    Works with both Pydantic V1 (list[dict]) and V2 (list[ErrorDetails]) error formats.
+    """
+    Format a list of validation errors into a human-readable multiline string.
+    
+    Accepts Pydantic v1-style error dicts (mapping with 'loc' and 'msg') or v2-style ErrorDetails-like objects/typed dicts with 'loc' and 'msg' attributes/keys. Each input error is rendered as a single line "  <location>: <message>" where location parts are joined by dots.
+    
+    Parameters:
+        errors (list[Any]): Iterable of error entries (dict-like or object-like) with `loc` and `msg`.
+    
+    Returns:
+        str: Multiline string with one formatted error per line; lines are joined with '\n'.
     """
     lines = []
     for error in errors:
@@ -191,6 +226,14 @@ class _ErrorsModule:
         msg_template = 'value error'
 
         def __init__(self, **ctx: Any) -> None:
+            """
+            Initialize the error with context and format its message.
+            
+            Stores the provided context on `self.ctx` and initializes the base exception message by formatting the instance's `msg_template` using the given context keys and values.
+            
+            Parameters:
+                **ctx: Mapping of placeholder names to values used to format `msg_template`.
+            """
             self.ctx = ctx
             super().__init__(self.msg_template.format(**ctx))
 
@@ -201,6 +244,14 @@ class _ErrorsModule:
         msg_template = 'type error'
 
         def __init__(self, **ctx: Any) -> None:
+            """
+            Initialize the error with context and format its message.
+            
+            Stores the provided context on `self.ctx` and initializes the base exception message by formatting the instance's `msg_template` using the given context keys and values.
+            
+            Parameters:
+                **ctx: Mapping of placeholder names to values used to format `msg_template`.
+            """
             self.ctx = ctx
             super().__init__(self.msg_template.format(**ctx))
 
@@ -227,6 +278,17 @@ class _TypesModule:
             source_type: Any,
             handler,
         ):
+            """
+            Provide a pydantic-core schema for this constrained integer type.
+            
+            Parameters:
+                cls: The constrained type class implementing `_validate`.
+                source_type (Any): The original Python type being processed by the schema.
+                handler: A pydantic-core schema handler callable (used by pydantic to resolve nested schemas).
+            
+            Returns:
+                core_schema: A pydantic-core schema that runs `cls._validate` before applying the integer schema.
+            """
             from pydantic_core import core_schema as cs
 
             return cs.no_info_before_validator_function(
@@ -236,6 +298,16 @@ class _TypesModule:
 
         @classmethod
         def __get_pydantic_json_schema__(cls, core_schema_, handler):
+            """
+            Augments the JSON Schema produced for this constrained numeric type with applicable numeric constraint keywords.
+            
+            Parameters:
+                core_schema_ (Any): The pydantic core schema for the type; passed to the handler to produce the base JSON Schema.
+                handler (Callable[[Any], dict]): Function that converts `core_schema_` to a JSON Schema dict.
+            
+            Returns:
+                dict: The JSON Schema dict for the class, with any of the following keys added when defined on the class: `exclusiveMinimum`, `minimum`, `exclusiveMaximum`, `maximum`, `multipleOf`.
+            """
             json_schema = handler(core_schema_)
             if cls.gt is not None:
                 json_schema['exclusiveMinimum'] = cls.gt
@@ -251,6 +323,19 @@ class _TypesModule:
 
         @classmethod
         def _validate(cls, v: Any) -> int:
+            """
+            Validate and coerce a numeric input to an integer while enforcing the class's numeric constraints.
+            
+            Parameters:
+                v (Any): Value to validate and coerce to an integer.
+            
+            Returns:
+                int: The coerced integer value that satisfies the class constraints.
+            
+            Raises:
+                TypeError: If `v` is not an int or float.
+                ValueError: If the coerced integer violates any configured bounds (`gt`, `ge`, `lt`, `le`) or `multiple_of`.
+            """
             if not isinstance(v, (int, float)):
                 raise TypeError('integer required')
             v = int(v)
@@ -282,6 +367,17 @@ class _TypesModule:
             source_type: Any,
             handler,
         ):
+            """
+            Provide a pydantic-core schema for this constrained-float type that runs the class `_validate` pre-validator and then enforces float validation.
+            
+            Parameters:
+                cls: The constrained type class providing `_validate`.
+                source_type: The original Python type being adapted (unused by this schema).
+                handler: Schema generation handler callable provided by pydantic (unused by this schema).
+            
+            Returns:
+                A pydantic-core schema that invokes `cls._validate` before applying float validation.
+            """
             from pydantic_core import core_schema as cs
 
             return cs.no_info_before_validator_function(
@@ -291,6 +387,16 @@ class _TypesModule:
 
         @classmethod
         def __get_pydantic_json_schema__(cls, core_schema_, handler):
+            """
+            Augments the JSON Schema produced for this constrained numeric type with applicable numeric constraint keywords.
+            
+            Parameters:
+                core_schema_ (Any): The pydantic core schema for the type; passed to the handler to produce the base JSON Schema.
+                handler (Callable[[Any], dict]): Function that converts `core_schema_` to a JSON Schema dict.
+            
+            Returns:
+                dict: The JSON Schema dict for the class, with any of the following keys added when defined on the class: `exclusiveMinimum`, `minimum`, `exclusiveMaximum`, `maximum`, `multipleOf`.
+            """
             json_schema = handler(core_schema_)
             if cls.gt is not None:
                 json_schema['exclusiveMinimum'] = cls.gt
@@ -306,6 +412,20 @@ class _TypesModule:
 
         @classmethod
         def _validate(cls, v: Any) -> float:
+            """
+            Validate a value and coerce it to a float while enforcing optional comparison bounds on the class.
+            
+            Parameters:
+                cls: Class-like object providing optional numeric attributes `gt`, `ge`, `lt`, and `le` used as bounds.
+                v (Any): Value to validate and convert.
+            
+            Returns:
+                float: The validated value converted to a Python float.
+            
+            Raises:
+                TypeError: If `v` is not an int or float.
+                ValueError: If `v` violates any of the configured bounds (`gt`, `ge`, `lt`, `le`).
+            """
             if not isinstance(v, (int, float)):
                 raise TypeError('float required')
             v = float(v)
@@ -330,6 +450,15 @@ class _UtilsModule:
 
     @staticmethod
     def sequence_like(v: Any) -> bool:
+        """
+        Determine whether a value is a sequence-like container (list, tuple, set, or frozenset), excluding strings and bytes.
+        
+        Parameters:
+            v: Value to test for sequence-like type.
+        
+        Returns:
+            True if `v` is an instance of `list`, `tuple`, `set`, or `frozenset`, False otherwise.
+        """
         return isinstance(v, (list, tuple, set, frozenset))
 
 

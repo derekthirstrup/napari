@@ -86,6 +86,18 @@ class Theme(EventedModel):
     @field_validator('syntax_style', mode='before')
     @classmethod
     def _ensure_syntax_style(cls, value: str) -> str:
+        """
+        Validate that `value` is a recognized Pygments syntax style.
+        
+        Parameters:
+            value (str): Candidate syntax style name.
+        
+        Returns:
+            str: The same `value` when it is a valid Pygments style.
+        
+        Raises:
+            AssertionError: If `value` is not one of the available Pygments styles.
+        """
         from pygments.styles import STYLE_MAP
 
         assert value in STYLE_MAP, trans._(
@@ -99,6 +111,18 @@ class Theme(EventedModel):
     @field_validator('font_size', mode='before')
     @classmethod
     def _ensure_font_size(cls, value: str) -> str:
+        """
+        Validate that a font size string specifies a positive point value and return it.
+        
+        Parameters:
+            value (str): Font size string that must end with 'pt' and have a numeric value greater than 0 (e.g., '12pt').
+        
+        Returns:
+            str: The validated font size string.
+        
+        Raises:
+            AssertionError: If `value` does not end with 'pt' or if the numeric point value is not greater than 0.
+        """
         assert value.endswith('pt'), trans._(
             'Font size must be in points (pt).', deferred=True
         )
@@ -109,7 +133,12 @@ class Theme(EventedModel):
 
     def to_rgb_dict(self) -> dict[str, Any]:
         """
-        This differs from baseclass `model_dump()` by converting colors to rgb.
+        Return the theme's fields as a dict with Color values converted to RGB tuples.
+        
+        Uses the model's serialized fields and converts any Color instances to (r, g, b) tuples; non-Color values are left unchanged.
+        
+        Returns:
+            dict[str, Any]: Mapping of field names to values where Color values are `(r, g, b)` tuples.
         """
         th = super().model_dump()
         return {
@@ -236,23 +265,19 @@ def get_system_theme() -> str:
 
 
 def get_theme(theme_id: str):
-    """Get a copy of theme based on its id.
-
-    If you get a copy of the theme, changes to the theme model will not be
-    reflected in the UI unless you replace or add the modified theme to
-    the `_themes` container.
-
-    Parameters
-    ----------
-    theme_id : str
-        ID of requested theme.
-
-    Returns
-    -------
-    theme: dict of str: str
-        Theme mapping elements to colors. A copy is created
-        so that manipulating this theme can be done without
-        side effects.
+    """
+    Return a copy of the theme identified by the given id.
+    
+    Parameters:
+        theme_id (str): Identifier of the requested theme. The special id `'system'`
+            resolves to the current system theme.
+    
+    Returns:
+        Theme: A copy of the Theme model for the requested id; modifying this copy
+        does not modify the internally registered theme.
+    
+    Raises:
+        ValueError: If no theme with the given id is available.
     """
     if theme_id == 'system':
         theme_id = get_system_theme()
@@ -410,12 +435,32 @@ register_theme('light', LIGHT, 'builtin')
 
 # this function here instead of plugins._npe2 to avoid circular import
 def _install_npe2_themes(themes=None):
+    """
+    Install themes contributed by NPE2 plugins into the given themes mapping.
+    
+    For each theme declared by installed NPE2 plugins, merges the plugin-provided metadata
+    and color overrides with the corresponding base theme in `themes`, then registers the
+    resulting theme (via register_theme). Registration failures are caught and logged.
+    
+    Parameters:
+        themes (Mapping[str, Theme] | None): Mapping of theme IDs to Theme instances to
+            update and register into. If None, the module-level `_themes` mapping is used.
+    """
     if themes is None:
         themes = _themes
     import npe2
 
     def _model_dump(obj, **kwargs):
-        """Compatibility helper for npe2 models (supports both Pydantic V1 and V2)."""
+        """
+        Serialize a Pydantic model to a dictionary-compatible mapping, handling both Pydantic v1 and v2 models.
+        
+        Parameters:
+            obj: The model instance to serialize. Expected to implement either `model_dump()` (Pydantic v2) or `dict()` (Pydantic v1).
+            **kwargs: Forwarded to the underlying model dump method (`model_dump` or `dict`) and control serialization options.
+        
+        Returns:
+            dict: A dictionary-like representation of the model produced by the appropriate dump method.
+        """
         if hasattr(obj, 'model_dump'):
             return obj.model_dump(**kwargs)
         # Pydantic V1 fallback

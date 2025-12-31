@@ -41,12 +41,17 @@ def _exclude_defaults_evented(
     obj: EventedModel,
     data: dict[str, Any],
 ) -> dict[str, Any]:
-    """Remove fields from data that equal their defaults.
-
-    Pydantic V2's exclude_defaults doesn't work correctly for EventedModel
-    because it compares __pydantic_private__ (private attributes) which are
-    always different between instances. This function manually compares using
-    only public model fields.
+    """
+    Exclude public model fields whose current values equal their defaults from the given serialized data.
+    
+    This function compares only public `model_fields` of an EventedModel to avoid pydantic v2's exclude_defaults issues with private attributes. It handles fields whose default is provided via a `default_factory` (by calling the factory), and recurses into nested EventedModel fields—including a nested field only if it contains any non-default values.
+    
+    Parameters:
+        obj (EventedModel): The model instance to compare against.
+        data (dict[str, Any]): Serialized representation of `obj` (e.g., model_dump output).
+    
+    Returns:
+        dict[str, Any]: A dictionary containing only fields from `data` whose values differ from the model's defaults.
     """
     from pydantic.fields import PydanticUndefined
 
@@ -110,6 +115,12 @@ class EventedSettings(EventedModel):
     )
 
     def __init__(self, **values: Any) -> None:
+        """
+        Initialize the EventedSettings instance, register a top-level 'changed' event, and connect nested sub-models for event propagation.
+        
+        Parameters:
+            values: Initial field values to populate the model.
+        """
         super().__init__(**values)
         self.events.add(changed=None)
         self._connect(self)
@@ -124,7 +135,13 @@ class EventedSettings(EventedModel):
         )
 
     def _connect(self, model: EventedModel, prefix: str = '') -> None:
-        """Recursively connect and re-emit to all sub-fields."""
+        """
+        Connect event emitters of a nested EventedModel to this instance so sub-field changes are re-emitted with a dotted path and restart-required fields trigger a restart warning.
+        
+        Parameters:
+            model (EventedModel): The sub-model whose evented fields will be connected.
+            prefix (str): String prefix to prepend to emitted field paths (should end with '.' when non-empty).
+        """
         # Use type(model).model_fields to avoid deprecation warning in V2.11+
         for name, field_info in type(model).model_fields.items():
             attr = getattr(model, name)
@@ -178,6 +195,23 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
 
     # provide config_path=None to prevent reading from disk.
     def __init__(self, config_path=_NOT_SET, **values: Any) -> None:
+        """
+        Create an instance of EventedConfigFileSettings, optionally loading and merging values from a config file and environment.
+        
+        Parameters:
+            config_path (Path | str | _NOT_SET): Path to a configuration file to load. If `_NOT_SET`, no config file is read and `None` is used for the instance's config path.
+            **values: Any: Explicit values passed to the constructor which take precedence over values from the config file but are overridden by environment-provided values.
+        
+        Behavior:
+            - If `config_path` is provided, reads file settings via `config_file_settings_source`, deep-copies and preserves the original file data in `self._config_file_settings`, then merges explicit `values` on top of the file data (explicit values override file values).
+            - Loads environment settings via `self._load_env_settings()` and merges them last so environment variables override both explicit and file-provided values.
+            - Calls the parent initializer with the merged values.
+            - Stores the resolved config path in `self._config_path` and caches raw environment values in `self._env_settings_cache`.
+        
+        Side effects:
+            - May read and validate a config file when `config_path` is provided.
+            - Sets private attributes `_config_path`, `_env_settings_cache`, and `_config_file_settings`.
+        """
         import copy as copy_module
 
         # Determine the config path to use
@@ -210,16 +244,13 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
         self._config_file_settings = original_file_settings
 
     def _load_env_settings(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Load settings from environment variables.
-
-        Supports both flat (NAPARI_FIELD) and nested (NAPARI_SECTION_FIELD) paths,
-        as well as custom env names defined in field json_schema_extra.
-
-        Returns
-        -------
-        tuple[dict, dict]
-            A tuple of (parsed_values, raw_values). parsed_values are for model
-            initialization, raw_values are for caching (to identify env-provided settings).
+        """
+        Load settings from environment variables and return both parsed values for model initialization and raw strings for caching.
+        
+        Supports flat names (e.g., NAPARI_FIELD), nested names (e.g., NAPARI_SECTION_FIELD), and custom environment names declared via a field's `json_schema_extra` `env` entry. Values are JSON-decoded when possible; common boolean string forms ("true"/"false", "1"/"0", "yes"/"no") are mapped to booleans for custom env entries. The environment prefix defaults to the class attribute `_env_prefix` (uppercased) or "NAPARI_".
+        
+        Returns:
+            tuple[dict, dict]: A pair (parsed_values, raw_values) where `parsed_values` is a dict suitable for model initialization (with nested dicts for nested fields) and `raw_values` contains the original environment strings used to produce `parsed_values`.
         """
         import json
 
@@ -309,6 +340,11 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
         return parsed, raw
 
     def _maybe_save(self):
+        """
+        Persist settings to the configured config file when automatic saving is enabled.
+        
+        If the instance has `_save_on_change` enabled and a `config_path` is set, this triggers saving the current settings to that path; otherwise no action is taken.
+        """
         if self._save_on_change and self.config_path:
             self.save()
 
@@ -318,7 +354,12 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
 
     @property
     def config_path(self):
-        """Return the path to/from which settings be saved/loaded."""
+        """
+        Get the filesystem path used for loading and saving configuration.
+        
+        Returns:
+            Path | None: The resolved path to the configuration file, or `None` if no config path is set.
+        """
         return self._config_path
 
     def model_dump(  # type: ignore[override]
@@ -334,9 +375,12 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
         exclude_env: bool = False,
         **kwargs: Any,
     ) -> DictStrAny:
-        """Return dict representation of the model.
-
-        May optionally specify which fields to include or exclude.
+        """
+        Produce a dictionary representation of the model.
+        
+        If `exclude_defaults` is True, fields whose values equal their defaults (including nested EventedModel fields) are removed from the output. If `exclude_env` is True, values that originated from environment variables are removed. Other parameters (include, exclude, by_alias, exclude_unset, exclude_none, mode) control selection and formatting consistent with Pydantic's `model_dump`.
+        Returns:
+            dict: The model represented as a dictionary.
         """
         # Don't pass exclude_defaults to super() - we handle it ourselves
         # because Pydantic V2's exclude_defaults doesn't work correctly for
@@ -369,7 +413,14 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
         exclude_none: bool = False,
         exclude_env: bool = False,
     ) -> DictStrAny:
-        """Return dict representation of the model (deprecated, use model_dump)."""
+        """
+        Provide a backward-compatible dict representation of the model; deprecated — use `model_dump`.
+        
+        This preserves the same include/exclude and filtering options accepted here for compatibility with older callers. It is kept only for backward compatibility and may be removed in a future release.
+        
+        Returns:
+            A dictionary mapping field names (or aliases when requested) to their serialized values.
+        """
         return self.model_dump(
             include=include,
             exclude=exclude,
@@ -381,11 +432,20 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
         )
 
     def _save_dict(self, **dict_kwargs: Any) -> DictStrAny:
-        """The minimal dict representation that will be persisted to disk.
-
-        By default, this will exclude settings values that match the default
-        value, and will exclude values that were provided by environment
-        variables.  Empty dicts will also be removed.
+        """
+        Produce the minimal dictionary of settings to persist to disk.
+        
+        By default this excludes fields equal to their model defaults, excludes values
+        sourced from environment variables, and removes empty dictionaries. Additional
+        options are forwarded to `model_dump` (e.g., `exclude_defaults` and
+        `exclude_env`) and can be used to override the defaults.
+        
+        Parameters:
+            dict_kwargs: Keyword arguments forwarded to `model_dump`.
+        
+        Returns:
+            A dict representing the settings to write to disk with defaults,
+            environment-provided values, and empty dicts removed.
         """
         dict_kwargs.setdefault('exclude_defaults', True)
         dict_kwargs.setdefault('exclude_env', True)
@@ -414,7 +474,16 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
         self._dump(str(path), self._save_dict(**dict_kwargs))
 
     def _dump(self, path: str, data: Dict) -> None:
-        """Encode and dump `data` to `path` using a path-appropriate encoder."""
+        """
+        Write settings data to a file using a serializer selected by the file extension.
+        
+        Parameters:
+            path (str): Filesystem path to write. The serializer is chosen from the path suffix.
+            data (Dict): Mapping of settings to serialize and write.
+        
+        Raises:
+            NotImplementedError: If the path extension is not `.yaml`, `.yml`, or `.json`.
+        """
         if str(path).endswith(('.yaml', '.yml')):
             _data = self._yaml_dump(data)
         elif str(path).endswith('.json'):
@@ -433,15 +502,25 @@ class EventedConfigFileSettings(EventedSettings, PydanticYamlMixin):
             target.write(_data)
 
     def env_settings(self) -> Dict[str, Any]:
-        """Get a dict of fields that were provided as environment vars."""
+        """
+        Retrieve the cached environment-provided settings.
+        
+        Returns:
+            A mapping of setting keys (flat or nested paths) to the raw values that were read from environment variables and applied during initialization.
+        """
         return self._env_settings_cache
 
     def _remove_env_settings(self, data):
-        """Remove key:values from `data` that match settings from env vars.
-
-        This is handy when we want to persist settings to disk without
-        including settings that were provided by environment variables (which
-        are usually more temporary).
+        """
+        Remove entries from `data` that were supplied via environment variables.
+        
+        Modifies `data` in place by deleting or restoring keys that match the cached
+        environment-provided settings for this instance; when a removed key has a
+        saved default in the configuration file, that default is restored instead of
+        being left absent.
+        
+        Parameters:
+            data (dict): Mutable mapping representing settings to persist; updated in place.
         """
         env_data = self.env_settings()
         if env_data:
@@ -457,19 +536,20 @@ def config_file_settings_source(
     settings_cls: type,
     config_path: Path | str | None,
 ) -> dict[str, Any]:
-    """Read config files during init of an EventedConfigFileSettings obj.
-
-    Parameters
-    ----------
-    settings_cls : type
-        The settings class
-    config_path : Path | str | None
-        Path to the config file
-
-    Returns
-    -------
-    dict
-        *validated* values for the model.
+    """
+    Read and validate configuration data from the given file path(s) for initializing an EventedConfigFileSettings subclass.
+    
+    This function loads YAML (.yaml, .yml) or JSON (.json) files at the provided path, merges their mappings, and validates the merged data against the provided settings class by instantiating a temporary settings_cls(config_path=None, **data). If validation errors occur, invalid keys are removed and a backup of the original file is attempted; if the settings class enables `strict_config_check` in its `model_config`, the ValidationError is re-raised instead of removing keys. Nonexistent or unsupported paths return an empty dict.
+    
+    Parameters:
+        settings_cls (type): The settings class to validate the loaded data against.
+        config_path (Path | str | None): Path to the config file to read; if None or the file does not exist, no data is loaded.
+    
+    Returns:
+        dict: A mapping of validated configuration values suitable for passing into the settings class (may be empty).
+    
+    Raises:
+        ValidationError: Re-raised when validation fails and `settings_cls.model_config['strict_config_check']` is truthy.
     """
     if not config_path:
         return {}
@@ -559,24 +639,15 @@ def config_file_settings_source(
 
 
 def _remove_bad_keys(data: dict, keys: list[tuple[int | str, ...]]):
-    """Remove list of keys (as string tuples) from dict (in place).
-
-    Parameters
-    ----------
-    data : dict
-        dict to modify (will be modified inplace)
-    keys : List[Tuple[str, ...]]
-        list of possibly nested keys
-
-    Examples
-    --------
-
-    >>> data = {'a': 1, 'b' : {'c': 2, 'd': 3}, 'e': 4}
-    >>> keys = [('b', 'd'), ('e',)]
-    >>> _remove_bad_keys(data, keys)
-    >>> data
-    {'a': 1, 'b': {'c': 2}}
-
+    """
+    Remove specified nested keys from a dictionary in place.
+    
+    Parameters:
+        data (dict): Mapping to modify; entries will be deleted directly.
+        keys (list[tuple[int | str, ...]]): List of key paths to remove. Each key path is a tuple of path components;
+            traversal descends dictionaries following the components. An empty tuple is ignored.
+            If an integer component is encountered during traversal, it is treated as an index indicator and stops
+            further descent so the final deletion happens at the last resolved mapping level.
     """
     for key in keys:
         if not key:
@@ -595,7 +666,17 @@ def _remove_bad_keys(data: dict, keys: list[tuple[int | str, ...]]):
 
 
 def _restore_config_data(dct: dict, delete: dict, defaults: dict) -> dict:
-    """delete nested dict keys, restore from defaults."""
+    """
+    Restore or remove keys in a configuration mapping using a "delete" specification and fallback defaults.
+    
+    Parameters:
+        dct (dict): Target dictionary representing current configuration; will be modified in place.
+        delete (dict): Mapping describing keys to remove or restore. For keys with dict values, the function applies the same logic recursively to nested mappings.
+        defaults (dict): Mapping of default values used to restore keys when available.
+    
+    Returns:
+        dict: The modified `dct` after restoration and deletions.
+    """
     for k, v in delete.items():
         # recurse
         if isinstance(v, dict):

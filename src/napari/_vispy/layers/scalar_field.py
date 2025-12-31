@@ -95,6 +95,11 @@ class VispyScalarFieldBaseLayer(VispyBaseLayer[ScalarFieldBase]):
         self.reset()
 
     def _on_data_change(self) -> None:
+        """
+        Update the visual node to reflect the layer's current image data and display configuration.
+        
+        Retrieves the layer's data view, adapts its shape when the viewer display dimensionality exceeds the layer's dimensionality, downsamples the data if it exceeds the configured maximum texture size for 2D or 3D, and ensures the correct node type is used for the current display mode. Sets the node's image data and visibility, refreshes transforms for the new dimensions, and requests a node redraw.
+        """
         data = fix_data_dtype(self.layer._data_view)
         ndisplay = self.layer._slice_input.ndisplay
 
