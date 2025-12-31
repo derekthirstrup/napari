@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import inspect
 import itertools
 import os
@@ -21,7 +22,7 @@ import numpy as np
 from app_model.expressions import Context
 
 from napari import layers
-from napari._pydantic_compat import Extra, Field, PrivateAttr, validator
+from napari._pydantic_compat import Field, PrivateAttr, field_validator
 from napari.components._layer_slicer import _LayerSlicer
 from napari.components._viewer_mouse_bindings import (
     dims_scroll,
@@ -108,7 +109,8 @@ EXCLUDE_DICT = {
     'mouse_wheel_callbacks',
 }
 EXCLUDE_JSON = EXCLUDE_DICT.union({'layers', 'active_layer'})
-Dict = dict  # rename, because ViewerModel has method dict
+# Use builtin dict for type hints since ViewerModel has a method named 'dict'
+Dict = builtins.dict
 
 __all__ = ['ViewerModel', 'valid_add_kwargs']
 
@@ -179,18 +181,18 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         objects.
     """
 
-    # Using allow_mutation=False means these attributes aren't settable and don't
+    # Using frozen=True means these attributes aren't settable and don't
     # have an event emitter associated with them
-    camera: Camera = Field(default_factory=Camera, allow_mutation=False)
-    cursor: Cursor = Field(default_factory=Cursor, allow_mutation=False)
-    dims: Dims = Field(default_factory=Dims, allow_mutation=False)
-    grid: GridCanvas = Field(default_factory=GridCanvas, allow_mutation=False)
+    camera: Camera = Field(default_factory=Camera, frozen=True)
+    cursor: Cursor = Field(default_factory=Cursor, frozen=True)
+    dims: Dims = Field(default_factory=Dims, frozen=True)
+    grid: GridCanvas = Field(default_factory=GridCanvas, frozen=True)
     layers: LayerList = Field(
-        default_factory=LayerList, allow_mutation=False
+        default_factory=LayerList, frozen=True
     )  # Need to create custom JSON encoder for layer!
     help: str = ''
-    status: Union[str, dict] = 'Ready'
-    tooltip: Tooltip = Field(default_factory=Tooltip, allow_mutation=False)
+    status: Union[str, Dict[str, Any]] = 'Ready'
+    tooltip: Tooltip = Field(default_factory=Tooltip, frozen=True)
     theme: str = Field(default_factory=_current_theme)
     title: str = 'napari'
     # private track of overlays, only expose the old ones for backward compatibility
@@ -217,8 +219,8 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         # FIXME: just like the LayerList, this object should ideally be created
         # elsewhere.  The app should know about the ViewerModel, but not vice versa.
         self._ctx = create_context(self, max_depth=0)
-        # allow extra attributes during model initialization, useful for mixins
-        self.__config__.extra = Extra.allow
+        # Note: In Pydantic V2, model_config is immutable at runtime.
+        # Extra attributes from mixins are handled by model_config settings.
         super().__init__(
             title=title,
             dims={
@@ -228,7 +230,6 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
                 'order': order,
             },
         )
-        self.__config__.extra = Extra.ignore
 
         settings = get_settings()
         self.tooltip.visible = settings.appearance.layer_tooltip_visibility
@@ -288,10 +289,10 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         self.layers.events.reordered.connect(self._on_layers_change)
         self.layers.selection.events.active.connect(self._on_active_layer)
 
-        # Add mouse callback
-        self.mouse_wheel_callbacks.append(dims_scroll)
-        self.mouse_double_click_callbacks.append(double_click_to_zoom)
-        self.mouse_drag_callbacks.append(drag_to_zoom)
+        # Add mouse callback (from MousemapProvider mixin)
+        self.mouse_wheel_callbacks.append(dims_scroll)  # type: ignore[attr-defined]
+        self.mouse_double_click_callbacks.append(double_click_to_zoom)  # type: ignore[attr-defined]
+        self.mouse_drag_callbacks.append(drag_to_zoom)  # type: ignore[attr-defined]
 
         self._overlays.update({k: v() for k, v in DEFAULT_OVERLAYS.items()})
 
@@ -341,7 +342,8 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         )
         self.grid.spacing = settings.application.grid_spacing
 
-    @validator('theme', allow_reuse=True)
+    @field_validator('theme')
+    @classmethod
     def _valid_theme(cls, v):
         if not is_theme_available(v):
             raise ValueError(
@@ -355,7 +357,7 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
 
         return v
 
-    def json(self, **kwargs):
+    def model_dump_json(self, **kwargs):
         """Serialize to json."""
         # Manually exclude the layer list and active layer which cannot be serialized at this point
         # and mouse and keybindings don't belong on model
@@ -363,9 +365,9 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         # https://github.com/samuelcolvin/pydantic/issues/660#issuecomment-642211017
         exclude = kwargs.pop('exclude', set())
         exclude = exclude.union(EXCLUDE_JSON)
-        return super().json(exclude=exclude, **kwargs)
+        return super().model_dump_json(exclude=exclude, **kwargs)
 
-    def dict(self, **kwargs):
+    def model_dump(self, **kwargs):
         """Convert to a dictionary."""
         # Manually exclude the layer list and active layer which cannot be serialized at this point
         # and mouse and keybindings don't belong on model
@@ -373,7 +375,16 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         # https://github.com/samuelcolvin/pydantic/issues/660#issuecomment-642211017
         exclude = kwargs.pop('exclude', set())
         exclude = exclude.union(EXCLUDE_DICT)
-        return super().dict(exclude=exclude, **kwargs)
+        return super().model_dump(exclude=exclude, **kwargs)
+
+    # Compatibility aliases for Pydantic V1 API
+    def json(self, **kwargs):
+        """Deprecated: Use model_dump_json() instead."""
+        return self.model_dump_json(**kwargs)
+
+    def dict(self, **kwargs):
+        """Deprecated: Use model_dump() instead."""
+        return self.model_dump(**kwargs)
 
     def __hash__(self):
         return id(self)
