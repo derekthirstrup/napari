@@ -98,6 +98,21 @@ class TextManager(EventedModel):
     def __init__(
         self, text=None, properties=None, n_text=None, features=None, **kwargs
     ) -> None:
+        """
+        Initialize the TextManager and apply encodings for the provided features.
+        
+        Initializes the model using remaining keyword arguments (model fields such as `string`, `color`, `size`, etc.), validates and normalizes the provided feature data, and applies encodings so the manager's string and color values are populated for the initial features. Several legacy parameters are accepted for backward compatibility and emit deprecation warnings while being translated to the current parameters:
+        
+        Parameters:
+            text (optional): Deprecated. Legacy alias for `string` encoding; if provided, it is used to set the `string` field and a deprecation warning is emitted.
+            properties (optional): Deprecated. Legacy container of feature data; if provided it is validated and converted to `features`, with a deprecation warning.
+            n_text (optional): Deprecated. Legacy shorthand for the number of text entries; its presence triggers a deprecation warning and is used when validating legacy `properties`.
+            features (optional): Feature data (rows of attribute values) to which encodings are applied. This input is validated before being used.
+            **kwargs: Other model fields passed to the base class initializer (for example `string`, `color`, `size`, `scaling`, etc.). If `values` is present in `kwargs` it is treated as the deprecated alias for `string` and a deprecation warning is emitted.
+        
+        Side effects:
+            Emits deprecation warnings for legacy parameters when used, initializes the base model with `kwargs`, and calls `apply(features)` to populate encodings from the validated features.
+        """
         if n_text is not None:
             _warn_about_deprecated_n_text_parameter()
         if properties is not None:
@@ -312,20 +327,17 @@ class TextManager(EventedModel):
         text: Union['TextManager', dict, str, Sequence[str], None],
         features: Any,
     ) -> 'TextManager':
-        """Create a TextManager from a layer.
-
-        Parameters
-        ----------
-        text : Union[TextManager, dict, str, Sequence[str], None]
-            An instance of TextManager, a dict that contains some of its state,
-            a string that may be a format string or a feature name, or a
-            sequence of strings specified manually.
-        features : Any
-            The features table of a layer.
-
-        Returns
-        -------
-        TextManager
+        """
+        Create a TextManager configured from the provided layer text state and features.
+        
+        Parameters:
+            text (TextManager | dict | str | Sequence[str] | None):
+                Source text state. If a TextManager is provided, its public state is obtained via `model_dump()`. If a dict is provided, it is copied and used as keyword arguments. If `None`, an empty constant string encoding is used. Otherwise the value is used as the `string` encoding (a format string, feature name, or explicit sequence of strings).
+            features (Any):
+                The layer's features table to attach to the created TextManager.
+        
+        Returns:
+            TextManager: A newly constructed TextManager initialized with the resolved text settings and the provided features.
         """
         if isinstance(text, TextManager):
             kwargs = text.model_dump()
@@ -344,16 +356,14 @@ class TextManager(EventedModel):
         text: Union['TextManager', dict, str, None],
         features: Any,
     ):
-        """Updates this in-place from a layer.
-
-        This will effectively overwrite all existing state, but in-place
-        so that there is no need for any external components to reconnect
-        to any useful events. For this reason, only fields that change in
-        value will emit their corresponding events.
-
-        Parameters
-        ----------
-        See :meth:`TextManager._from_layer`.
+        """
+        Update this TextManager in place using the provided layer text specification and features.
+        
+        This validates the new state on a temporary copy before applying changes to this instance, so errors are raised prior to mutation. Only fields whose values change will emit their corresponding events. After updating, encodings are (re)applied for the given features to ensure encoded values match the new state.
+        
+        Parameters:
+            text (TextManager | dict | str | None): Layer text specification — an existing TextManager, a dict of text manager parameters, a plain string encoding, or None for an empty string encoding.
+            features (Any): Layer feature data used to (re)apply encodings so they are consistent with the updated state.
         """
         # Create a new instance from the input to populate all fields.
         new_manager = TextManager._from_layer(text=text, features=features)
@@ -378,6 +388,17 @@ class TextManager(EventedModel):
     @field_validator('blending', mode='before')
     @classmethod
     def _check_blending_mode(cls, blending):
+        """
+        Normalize a blending input to a valid Blending enum for text and disallow opaque mode.
+        
+        If the provided `blending` corresponds to `Blending.OPAQUE`, a `RuntimeWarning` is emitted and `Blending.TRANSLUCENT` is returned.
+        
+        Parameters:
+            blending: A blending mode or value convertible to the `Blending` enum.
+        
+        Returns:
+            blending_mode (Blending): The normalized blending mode; never `Blending.OPAQUE`.
+        """
         blending_mode = Blending(blending)
 
         # The opaque blending mode is not allowed for text.

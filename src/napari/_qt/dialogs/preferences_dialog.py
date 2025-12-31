@@ -88,7 +88,11 @@ class PreferencesDialog(QDialog):
         super().resizeEvent(event)
 
     def _rebuild_dialog(self):
-        """Removes settings not to be exposed to user and creates dialog pages."""
+        """
+        Rebuilds the preferences dialog pages from the current settings.
+        
+        Records the initial settings values and plugin call order, clears the navigation list and stacked pages, and repopulates the dialog with one page per settings category whose type is a BaseModel.
+        """
         # FIXME: this dialog should not need to know about the plugin manager
         from napari.plugins import plugin_manager
 
@@ -115,16 +119,23 @@ class PreferencesDialog(QDialog):
     def _add_page(
         self, field_name: str, field_info: 'FieldInfo', annotation: type
     ):
-        """Builds the preferences widget using the json schema builder.
-
-        Parameters
-        ----------
-        field_name : str
-            Name of the field.
-        field_info : FieldInfo
-            Field information for the subfield.
-        annotation : type
-            The type annotation (BaseModel subclass) for this field.
+        """
+        Create and add a preferences page for a settings field to the dialog.
+        
+        Builds a form widget from the field's JSON schema, wraps it in a scrollable page,
+        adds the page to the dialog navigation stack, and wires two-way synchronization
+        between the form state and the corresponding settings category:
+        - form changes update the settings category,
+        - settings emitters update the form widgets.
+        
+        The function respects the category's NapariConfig.preferences_exclude set and
+        handles nested event-model subfields (for example, 'dask' and 'highlight') by
+        connecting their emitters to the appropriate nested form widgets.
+        
+        Parameters:
+            field_name (str): The attribute name of the settings field.
+            field_info (FieldInfo): Field metadata (title/description) for the field.
+            annotation (type): The BaseModel subclass type describing the field's schema.
         """
         from napari._vendor.qt_json_builder.qt_jsonschema_form import (
             WidgetBuilder,
@@ -176,8 +187,28 @@ class PreferencesDialog(QDialog):
     def _get_page_dict(
         self, field_name: str, field_info: 'FieldInfo', annotation: type
     ) -> tuple[dict, dict]:
-        """Provides the schema, set of values for each setting, and the
-        properties for each setting."""
+        """
+        Builds a JSON schema and a corresponding values mapping for a preferences page.
+        
+        This returns a schema suitable for generating a settings form for the given
+        preferences field and a dictionary of the current values for that field. The
+        returned schema will represent enum fields as string enums, embed nested
+        BaseModel subfields as object properties, and omit any properties listed in
+        the field's NapariConfig.preferences_exclude. The function special-cases the
+        'shortcuts' field to provide a simplified schema compatible with the UI.
+        
+        Parameters:
+        	field_name (str): Name of the top-level settings field (e.g., "appearance",
+        		"shortcuts").
+        	field_info (FieldInfo): Field metadata (title, description) from the settings
+        		model; used to override the schema's title/description when present.
+        	annotation (type): The BaseModel subclass that defines the settings shape.
+        
+        Returns:
+        	schema (dict): A JSON-schema-like mapping describing the form for the field.
+        	values (dict): A JSON-serializable dict of current values for the field,
+        		with enums serialized as strings and excluded properties removed.
+        """
         ftype = cast('BaseModel', annotation)
 
         # TODO make custom shortcuts dialog to properly capture new

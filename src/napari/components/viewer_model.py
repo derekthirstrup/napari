@@ -214,6 +214,15 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         self, title='napari', ndisplay=2, order=(), axis_labels=()
     ) -> None:
         # max_depth=0 means don't look for parent contexts.
+        """
+        Initialize the ViewerModel, create its application context, and configure viewer state, settings, event connections, and default overlays.
+        
+        Parameters:
+            title (str): Window title for the viewer.
+            ndisplay (int): Number of displayed dimensions (2 or 3).
+            order (tuple): Display order of axes; determines axis stacking and rendering order.
+            axis_labels (tuple): Labels for each axis; used to set initial dimensional labels and to compute ndim.
+        """
         from napari._app_model.context import create_context
 
         # FIXME: just like the LayerList, this object should ideally be created
@@ -331,7 +340,11 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         )
 
     def _update_viewer_grid(self):
-        """Keep viewer grid settings up to date with settings values."""
+        """
+        Update the viewer's grid properties to match the current application settings.
+        
+        Sets the grid's stride, shape (height, width), and spacing from the application's grid configuration.
+        """
 
         settings = get_settings()
 
@@ -345,6 +358,18 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
     @field_validator('theme')
     @classmethod
     def _valid_theme(cls, v):
+        """
+        Validate that the provided theme name corresponds to an available theme.
+        
+        Parameters:
+            v (str): Candidate theme name.
+        
+        Returns:
+            The validated theme name.
+        
+        Raises:
+            ValueError: If the theme name is not available; message lists available themes.
+        """
         if not is_theme_available(v):
             raise ValueError(
                 trans._(
@@ -358,7 +383,19 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         return v
 
     def model_dump_json(self, **kwargs):
-        """Serialize to json."""
+        """
+        Serialize the ViewerModel to a JSON string while omitting known non-serializable fields.
+        
+        Any `exclude` passed via `kwargs` is merged with the module's default exclusion set (EXCLUDE_JSON),
+        so the layer list, active layer, and mouse/keybinding data are always omitted from the output.
+        
+        Parameters:
+            kwargs: Additional keyword arguments forwarded to pydantic's `model_dump_json`. If `exclude`
+                is provided it will be combined with the default exclusions.
+        
+        Returns:
+            json_str: A JSON-formatted string representing the model with the specified fields excluded.
+        """
         # Manually exclude the layer list and active layer which cannot be serialized at this point
         # and mouse and keybindings don't belong on model
         # https://github.com/samuelcolvin/pydantic/pull/2231
@@ -368,7 +405,18 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         return super().model_dump_json(exclude=exclude, **kwargs)
 
     def model_dump(self, **kwargs):
-        """Convert to a dictionary."""
+        """
+        Serialize the ViewerModel to a dictionary suitable for persistence or inspection.
+        
+        kwargs:
+            Additional keyword arguments forwarded to pydantic's `model_dump`. If an `exclude`
+            mapping is provided it will be extended with viewer-specific keys (see EXCLUDE_DICT)
+            to ensure non-serializable or transient fields (for example the layer list, active
+            layer, and input bindings) are omitted.
+        
+        Returns:
+            dict: A dictionary representation of the model with viewer-specific exclusions applied.
+        """
         # Manually exclude the layer list and active layer which cannot be serialized at this point
         # and mouse and keybindings don't belong on model
         # https://github.com/samuelcolvin/pydantic/pull/2231
@@ -383,10 +431,24 @@ class ViewerModel(KeymapProvider, MousemapProvider, EventedModel):
         return self.model_dump_json(**kwargs)
 
     def dict(self, **kwargs):
-        """Deprecated: Use model_dump() instead."""
+        """
+        Deprecated alias for model_dump maintained for backward compatibility.
+        
+        Parameters:
+            **kwargs: Keyword arguments forwarded to model_dump().
+        
+        Returns:
+            dict: The model's serialized representation as produced by model_dump().
+        """
         return self.model_dump(**kwargs)
 
     def __hash__(self):
+        """
+        Provide a hash value for the viewer based on the object's identity.
+        
+        Returns:
+            int: Integer hash derived from the object's identity (stable for the object's lifetime).
+        """
         return id(self)
 
     def __str__(self):

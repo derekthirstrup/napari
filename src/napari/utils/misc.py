@@ -441,25 +441,20 @@ def _arraylike_short_names(obj) -> Iterator[str]:
 
 
 def pick_equality_operator(obj: Any) -> Callable[[Any, Any], bool]:
-    """Return a function that can check equality between ``obj`` and another.
-
-    Rather than always using ``==`` (i.e. ``operator.eq``), this function
-    returns operators that are aware of object types: mostly "array types with
-    more than one element" whose truth value is ambiguous.
-
-    This function works for both classes (types) and instances.  If an instance
-    is passed, it will be first cast to a type with type(obj).
-
-    Parameters
-    ----------
-    obj : Any
-        An object whose equality with another object you want to check.
-
-    Returns
-    -------
-    operator : Callable[[Any, Any], bool]
-        An operation that can be called as ``operator(obj, other)`` to check
-        equality between objects of type ``type(obj)``.
+    """
+    Choose an equality operator appropriate for the given object or type.
+    
+    Returns a comparator tailored to the object's type (for example, using elementwise-safe
+    comparisons for array-like types) instead of the plain `==`. Accepts either an instance
+    or a type; if given a Union type, inspects type arguments and prefers a non-default
+    comparator when available.
+    
+    Parameters:
+        obj (Any): An instance or type whose preferred equality operator should be selected.
+    
+    Returns:
+        Callable[[Any, Any], bool]: A binary predicate that returns `True` if the two inputs
+        should be considered equal for the provided object's type, `False` otherwise.
     """
     import operator
     import types

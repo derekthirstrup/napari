@@ -284,6 +284,14 @@ class ApplicationSettings(EventedModel):
     )
 
     def __setattr__(self, name: str, value: Any) -> None:
+        """
+        Restricts assignment of the `startup_script` setting to calls originating from the napari application.
+        
+        When assigning `startup_script` to a non-None value, verifies the caller frame is available and that the caller's module name starts with "napari.". If those checks fail, raises ValueError with a message indicating the setting can only be set by the napari application. For all other attributes (or when `startup_script` is set to None), delegates to the base implementation.
+         
+        Raises:
+            ValueError: If the current frame cannot be inspected or the caller is not in a module whose name starts with "napari.".
+        """
         if name == 'startup_script' and value is not None:
             # Ensure the script is a valid Python file
             frame = inspect.currentframe()
@@ -304,6 +312,18 @@ class ApplicationSettings(EventedModel):
     @field_validator('window_state')
     @classmethod
     def _validate_qbtye(cls, v: str) -> str:
+        """
+        Ensure a QByte string is empty or begins with '!QBYTE_'.
+        
+        Parameters:
+            v (str): The string to validate.
+        
+        Returns:
+            str: The input string unchanged if it is empty or starts with '!QBYTE_'.
+        
+        Raises:
+            ValueError: If `v` is non-empty and does not start with '!QBYTE_'.
+        """
         if v and (not isinstance(v, str) or not v.startswith('!QBYTE_')):
             raise ValueError(
                 trans._("QByte strings must start with '!QBYTE_'")
