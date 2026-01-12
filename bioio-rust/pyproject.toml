@@ -1,0 +1,89 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "bioio-rust"
+version = "0.1.0"
+description = "High-performance microscopy image I/O library powered by Rust"
+readme = "README.md"
+license = { text = "BSD-3-Clause" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Derek Thirstrup" },
+]
+keywords = [
+    "microscopy",
+    "imaging",
+    "bioimaging",
+    "tiff",
+    "nd2",
+    "ome-tiff",
+    "napari",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "numpy>=1.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-benchmark>=4.0",
+    "hypothesis>=6.0",
+    "tifffile>=2023.0",
+    "nd2>=0.7",
+]
+compat = [
+    "xarray>=2023.0",
+    "dask[array]>=2023.0",
+]
+all = [
+    "bioio-rust[dev,compat]",
+]
+
+[project.urls]
+Homepage = "https://github.com/derekthirstrup/bioio-rust"
+Repository = "https://github.com/derekthirstrup/bioio-rust"
+Issues = "https://github.com/derekthirstrup/bioio-rust/issues"
+Documentation = "https://github.com/derekthirstrup/bioio-rust#readme"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "bioio_rust._core"
+strip = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
